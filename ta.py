@@ -85,3 +85,36 @@ def decay_instantaneous(t, t_pump, t_probe):
     return (
         1 / np.sqrt(2 * np.pi * tp_squared) * np.exp(-(t**2) / 2 / tp_squared)
     )
+
+def phasor(time_delays, ta_curve, freq):
+    """
+    Compute phasor coordinate pair for TA curve.
+
+    Parameters
+    ----------
+    time_delays : list of numbers
+        PP time delays.
+    ta_curve : list of numbers
+        TA values corresponding to time delays.
+    freq : number
+        Phasor frequency.
+
+    Returns
+    -------
+    phasor_coor : tuple of numbers
+        Phasor coordinates.
+
+    """
+    omega = freq * 2 * np.pi
+    sin = np.sin(time_delays * omega)
+    cos = np.cos(time_delays * omega)
+    
+    norm = np.sum(np.abs(ta_curve))
+    phasor_coor = np.array(
+        [
+            np.dot(cos, ta_curve) / norm,
+            np.dot(sin, ta_curve) / norm,
+        ]
+    )
+    
+    return phasor_coor
