@@ -475,10 +475,10 @@ class PPS:
         for i in index_x:
             for j in index_y:
                 temp_stack = PPS(
-                    [self.images[:, i[0] : i[1], j[0] : j[1]], self.times],
+                    [self.images[:, i[0]: i[1], j[0]: j[1]], self.times],
                     dataType="data",
                     filename=self.filename,
-                    mask=self.mask[i[0] : i[1], j[0] : j[1]],
+                    mask=self.mask[i[0]: i[1], j[0]: j[1]],
                 )
                 if temp_stack.count_nonzero_pixel() >= cutoff:
                     stacks.append(temp_stack)
@@ -514,8 +514,8 @@ class PPS:
                 for j in range(0, len_y):
                     block = self.images[
                         k,
-                        index_x[i][0] : index_x[i][1],
-                        index_y[j][0] : index_y[j][1],
+                        index_x[i][0]: index_x[i][1],
+                        index_y[j][0]: index_y[j][1],
                     ]
                     temp[i, j] = np.mean(block)
             erg.append(temp)
@@ -524,8 +524,8 @@ class PPS:
         for i in range(0, len_x):
             for j in range(0, len_y):
                 block = self.mask[
-                    index_x[i][0] : index_x[i][1],
-                    index_y[j][0] : index_y[j][1],
+                    index_x[i][0]: index_x[i][1],
+                    index_y[j][0]: index_y[j][1],
                 ]
                 mask[i, j] = np.any(block)
 
@@ -772,6 +772,142 @@ class PPS:
             ]
         )
         return phasor_coor
+
+    def intensity_threshold(
+            self,
+            threshold='Li',
+            sigma=5,
+            projection_use_mask=True,
+            show_mask=False
+    ):
+        """
+        Compute intensity threshold mask.
+
+        Compute stack projection with absolute value and derive intensity
+        thresholded mask, either by Li threshold or by numeric value threshold.
+
+        Parameters
+        ----------
+        threshold : str or number, optional
+            If Li a Li threshold cutoff is used, if numeric this nymber is used
+            as cutoff for the mask. The default is 'Li'.
+        sigma : numeric, optional
+            Gaussian filter sigma. The default is 5.
+        projection_use_mask : boolean, optional
+            If False the mask of this stack is not used for the projection.
+            The default is True.
+        show_mask : boolean, optional
+            Plot mask if True. The default is False.
+
+        Returns
+        -------
+        None.
+
+        """
+        # import filter
+        from skimage import filters
+
+        # compute intensity projection and do gaussian smoothing
+        projection = filters.gaussian(
+            self.project(maskOn=projection_use_mask),
+            sigma=sigma
+        )
+
+        # compute mask
+        if threshold == 'Li':
+            cutoff = filters.threshold_li(projection)
+            self.mask = self.mask & np.where(projection > cutoff, True, False)
+        elif isinstance(threshold, (int, float)):
+            self.mask = self.mask & np.where(
+                projection > threshold, True, False)
+        else:
+            print("invalid use of threshold variable")
+
+        if show_mask:
+            self.mask_show()
+
+    @staticmethod
+    def intensity_threshold_shared(stacks, threshold, sigma=5):
+        """
+        Return intensityold mask based on multiple pump-probe stacks.
+
+        Absolute value of all images in all stacks are summed up, Gaussian
+        filtered and intensity thresholded with cutoff.
+
+        Parameters
+        ----------
+        stacks : list of stacks
+            list of stacks.
+        threshold : number
+            cutoff threshold.
+        sigma : float, optional
+            Sigma value for Gaussian filter. The default is 5.
+
+        Returns
+        -------
+        array of booleans
+            Intensity mask.
+
+        """
+        from skimage.filters import gaussian
+
+        # combine all images into single array
+        all_images = np.concatenate([i.images for i in stacks])
+
+        # compute projection
+        projection = gaussian(
+            np.sum([np.abs(i) for i in all_images], axis=0),
+            sigma=sigma
+        )
+
+        # return mask
+        return (np.where(projection > threshold, True, False))
+
+    def mask_show(self):
+        """
+        Show mask and masked projection of stack.
+
+        Returns
+        -------
+        None.
+
+        """
+        # --- Custom colormap for the "normal" image ---
+        base_cmap = mlp.cm.get_cmap("viridis")
+        new_colors = base_cmap(np.linspace(0, 1, 256))
+        new_colors[0, :] = np.array([1, 1, 1, 1])  # lowest value → white
+        new_cmap = mlp.colors.ListedColormap(new_colors)
+
+        # --- Discrete colormap for mask ---
+        low_color = mlp.cm.get_cmap("viridis")(0.0)   # violet/blue end
+        high_color = new_cmap(1.0)  # yellow end
+        cmap_mask = mlp.colors.ListedColormap([low_color, high_color])
+
+        bounds = [0, 1, 2]
+        norm_mask = mlp.colors.BoundaryNorm(bounds, cmap_mask.N)
+
+        # --- Side-by-side plots ---
+        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+        # Left: binary mask
+        cax1 = axes[0].imshow(self.mask, cmap=cmap_mask, norm=norm_mask)
+        axes[0].set_title("Mask")
+        axes[0].axis("off")
+        fig.colorbar(cax1, ax=axes[0], ticks=[0, 1], fraction=0.046, pad=0.04)
+
+        # Right: normal image with custom cmap
+        cax2 = axes[1].imshow(self.project(), cmap=new_cmap)
+        axes[1].set_title("Image")
+        axes[1].axis("off")
+        cb2 = fig.colorbar(cax2, ax=axes[1], fraction=0.046, pad=0.04)
+
+        # Put ticks at the edges of the colorbar
+        vmin, vmax = cax2.get_clim()
+        cb2.set_ticks([vmin, vmax])
+        cb2.ax.set_yticklabels([f"{vmin:.2f}", f"{vmax:.2f}"])
+
+        plt.tight_layout()
+        plt.show()
 
 
 def main():
