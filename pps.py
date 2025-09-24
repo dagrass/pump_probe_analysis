@@ -909,6 +909,54 @@ class PPS:
         plt.tight_layout()
         plt.show()
 
+    def mask_update(self, mask):
+        """
+        Update mask of stack with mask.
+
+        The mask propperty of this stack is updated (logical and) with mask.
+
+        Parameters
+        ----------
+        mask : arry of bool
+            Mask to be updtaed with.
+
+        Returns
+        -------
+        None.
+
+        """
+        self.mask = self.mask & mask
+
+    @staticmethod
+    def linear_combination(stack1, coeff1, stack2, coeff2):
+        """
+        Compute linear combination of stack1 and stack2.
+
+        Parameters
+        ----------
+        stack1 : pp stack
+            stack1 for linear combination.
+        coeff1 : numeric
+            coefficient for stack1.
+        stack2 : pp stack
+            stack2 for linear combination.
+        coeff2 : TYPE
+            coefficient for stack2.
+
+        Returns
+        -------
+        pp stack
+            linear combination coeff1 * stack1 + coeff2 * stack2.
+
+        """
+        if np.allclose(stack1.times, stack2.times):
+            images = coeff1 * stack1.images + coeff2 * stack2.images
+            mask = stack1.mask & stack2.mask
+            return PPS([images, stack1.times], mask=mask)
+        else:
+            print('time delays of stack1 and stack2 differ')
+            return None
+
 
 def main():
     # path1 = ("W:/Data/CutaneousMelanoma/sample_set_Elpis/N93/"
