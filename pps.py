@@ -308,6 +308,34 @@ class PPS:
         mean = np.mean(self.images[:n], axis=0)
         self.images = self.images - mean
 
+    def normalize(self, norm="minmax", inPlace=False):
+        """
+        Normalize pp stack.
+
+        Parameters
+        ----------
+        norm : str, optional
+            Norm to be used. The default is "minmax".
+        inPlace : TYPE, optional
+            If True this instance will be normalized. The default is False.
+
+        Returns
+        -------
+        pp stack
+            Returns normalized stack.
+
+        """
+        if norm is None:
+            pass
+        elif norm == "minmax":
+            avg = self.avg()
+            extremum = np.max(np.abs([np.min(avg), np.max(avg)]))
+
+        if inPlace:
+            self.images = self.images / extremum
+
+        return PPS([self.images / extremum, self.times], mask=self.mask)
+
     def avg(self, maskOn=True, norm=None):
         """
         Compute average TA curve of pp stack.
