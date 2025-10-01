@@ -145,6 +145,21 @@ class PPS:
             return times
 
         # import conventional log file
+        if fn.endswith("_DS_CH1.tif"):
+            fn_new = fn.replace("_DS_CH1.tif", ".log")
+        elif fn.endswith("_DS_CH2.tif"):
+            fn_new = fn.replace("_DS_CH2.tif", ".log")
+        elif fn.endswith("_DS_CH3.tif"):
+            fn_new = fn.replace("_DS_CH3.tif", ".log")
+        elif fn.endswith("_DS_CH4.tif"):
+            fn_new = fn.replace("_DS_CH4.tif", ".log")
+        try:
+            with open(fn_new, "r", encoding="utf-8") as f:
+                log = f.read()
+        except UnicodeDecodeError:
+            with open(fn_new, "r", encoding="latin1") as f:
+                log = f.read()
+
         fn_new = fn.replace("_DS_CH1.tif", ".log")
 
         with open(fn_new, "r") as f:
@@ -503,10 +518,10 @@ class PPS:
         for i in index_x:
             for j in index_y:
                 temp_stack = PPS(
-                    [self.images[:, i[0]: i[1], j[0]: j[1]], self.times],
+                    [self.images[:, i[0] : i[1], j[0] : j[1]], self.times],
                     dataType="data",
                     filename=self.filename,
-                    mask=self.mask[i[0]: i[1], j[0]: j[1]],
+                    mask=self.mask[i[0] : i[1], j[0] : j[1]],
                 )
                 if temp_stack.count_nonzero_pixel() >= cutoff:
                     stacks.append(temp_stack)
@@ -542,8 +557,8 @@ class PPS:
                 for j in range(0, len_y):
                     block = self.images[
                         k,
-                        index_x[i][0]: index_x[i][1],
-                        index_y[j][0]: index_y[j][1],
+                        index_x[i][0] : index_x[i][1],
+                        index_y[j][0] : index_y[j][1],
                     ]
                     temp[i, j] = np.mean(block)
             erg.append(temp)
@@ -552,8 +567,8 @@ class PPS:
         for i in range(0, len_x):
             for j in range(0, len_y):
                 block = self.mask[
-                    index_x[i][0]: index_x[i][1],
-                    index_y[j][0]: index_y[j][1],
+                    index_x[i][0] : index_x[i][1],
+                    index_y[j][0] : index_y[j][1],
                 ]
                 mask[i, j] = np.any(block)
 
@@ -753,12 +768,9 @@ class PPS:
 
         # define false color scheme
         colors = [
-            (plt.cm.colors.to_rgba(color, alpha))
-            for alpha in np.linspace(0, 1, 256)
+            (plt.cm.colors.to_rgba(color, alpha)) for alpha in np.linspace(0, 1, 256)
         ]
-        cmapp = mlp.colors.LinearSegmentedColormap.from_list(
-            "transparent_red", colors
-        )
+        cmapp = mlp.colors.LinearSegmentedColormap.from_list("transparent_red", colors)
 
         fig, ax = plt.subplots(1, 1)
 
@@ -802,11 +814,7 @@ class PPS:
         return phasor_coor
 
     def intensity_threshold(
-            self,
-            threshold='Li',
-            sigma=5,
-            projection_use_mask=True,
-            show_mask=False
+        self, threshold="Li", sigma=5, projection_use_mask=True, show_mask=False
     ):
         """
         Compute intensity threshold mask.
@@ -837,17 +845,15 @@ class PPS:
 
         # compute intensity projection and do gaussian smoothing
         projection = filters.gaussian(
-            self.project(maskOn=projection_use_mask),
-            sigma=sigma
+            self.project(maskOn=projection_use_mask), sigma=sigma
         )
 
         # compute mask
-        if threshold == 'Li':
+        if threshold == "Li":
             cutoff = filters.threshold_li(projection)
             self.mask = self.mask & np.where(projection > cutoff, True, False)
         elif isinstance(threshold, (int, float)):
-            self.mask = self.mask & np.where(
-                projection > threshold, True, False)
+            self.mask = self.mask & np.where(projection > threshold, True, False)
         else:
             print("invalid use of threshold variable")
 
@@ -884,12 +890,11 @@ class PPS:
 
         # compute projection
         projection = gaussian(
-            np.sum([np.abs(i) for i in all_images], axis=0),
-            sigma=sigma
+            np.sum([np.abs(i) for i in all_images], axis=0), sigma=sigma
         )
 
         # return mask
-        return (np.where(projection > threshold, True, False))
+        return np.where(projection > threshold, True, False)
 
     def mask_show(self):
         """
@@ -907,7 +912,7 @@ class PPS:
         new_cmap = mlp.colors.ListedColormap(new_colors)
 
         # --- Discrete colormap for mask ---
-        low_color = mlp.cm.get_cmap("viridis")(0.0)   # violet/blue end
+        low_color = mlp.cm.get_cmap("viridis")(0.0)  # violet/blue end
         high_color = new_cmap(1.0)  # yellow end
         cmap_mask = mlp.colors.ListedColormap([low_color, high_color])
 
@@ -982,7 +987,7 @@ class PPS:
             mask = stack1.mask & stack2.mask
             return PPS([images, stack1.times], mask=mask)
         else:
-            print('time delays of stack1 and stack2 differ')
+            print("time delays of stack1 and stack2 differ")
             return None
 
 
