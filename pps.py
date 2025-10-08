@@ -8,7 +8,7 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 import matplotlib as mlp
-from skimage.io import ImageCollection
+from skimage import io
 import re
 
 
@@ -51,7 +51,7 @@ class PPS:
                 self.mask = self.project(maskOn=False) != 0
 
         elif dataType == "DukeScan":
-            self.images = np.array(ImageCollection(data))
+            self.images = np.array(io.imread_collection(data)[0], dtype=np.float64)
             self.times = PPS.time_delays(data)
             self.filename = data
             self.image_dimensions = self.images[0].shape
@@ -164,7 +164,7 @@ class PPS:
 
         with open(fn_new, "r") as f:
             log = f.read()
-        match = re.search("(?:delayArr_ps = )([\-0-9,.]+).*", log)
+        match = re.search(r"(?:delayArr_ps = )([\-0-9,.]+).*", log)
         if match:
             times = np.fromstring(match.group(1), dtype=float, sep=",")
         else:
