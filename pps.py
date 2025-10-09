@@ -382,6 +382,39 @@ class PPS:
 
         return avg
 
+    def avg_ta(self, size=-1, maskOn=True, norm=None, cutoff=10):
+        """
+        Compute average TA curves of substacks of given size.
+
+        Parameters
+        ----------
+        size : int, optional
+            Size of substacks. If -1 average over whole stack is computed.
+            The default is -1.
+        maskOn : Boolean, optional
+            Use mask for computation. The default is True.
+        norm : str, optional
+            Use norm for avg computation, i.e. minmax. The default is None.
+        cutoff : int, optional
+            If substack has less than cutoff non-zero pixel this substack in
+            particular is discarded. The default is 10.
+
+        Returns
+        -------
+        ta_curves : list of np array of float
+            List of averaged TA curves.
+        """
+        # average over whole stack
+        if size == -1:
+            ta_curves = [self.avg(norm=norm, maskOn=maskOn)]
+        # average over substacks of given size
+        else:
+            # compute substacks and average TA curves
+            substacks = self.substacks(size=size, cutoff=cutoff)
+            ta_curves = [i.avg(norm=norm, maskOn=maskOn) for i in substacks]
+
+            return ta_curves
+
     def avg_show(self, maskOn=True, norm=None):
         fig, ax = plt.subplots()
         ax.plot(self.times, self.avg(maskOn=maskOn, norm=norm))
