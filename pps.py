@@ -573,8 +573,8 @@ class PPS:
 
         return stacks
 
-    def downsample(self, size, obsolte_version=False):
-        if obsolte_version:
+    def downsample(self, size, obsolete_version=False):
+        if obsolete_version:
             return self.downsample_obsolete(size)
 
         images_ds = [downscale_local_mean(img, (size, size)) for img in self.images]
@@ -873,7 +873,7 @@ class PPS:
         return phasor_coor
 
     def intensity_threshold(
-        self, threshold="Li", sigma=5, projection_use_mask=True, show_mask=False
+        self, threshold="Li", sigma=5, projection_use_mask=True, inplace=False
     ):
         """
         Compute intensity threshold mask.
@@ -891,8 +891,8 @@ class PPS:
         projection_use_mask : boolean, optional
             If False the mask of this stack is not used for the projection.
             The default is True.
-        show_mask : boolean, optional
-            Plot mask if True. The default is False.
+        inplace : boolean, optional
+            Update current mask if True. The default is False.
 
         Returns
         -------
@@ -910,14 +910,17 @@ class PPS:
         # compute mask
         if threshold == "Li":
             cutoff = filters.threshold_li(projection)
-            self.mask = self.mask & np.where(projection > cutoff, True, False)
+            mask = self.mask & np.where(projection > cutoff, True, False)
+
         elif isinstance(threshold, (int, float)):
-            self.mask = self.mask & np.where(projection > threshold, True, False)
+            mask = self.mask & np.where(projection > threshold, True, False)
         else:
             print("invalid use of threshold variable")
 
-        if show_mask:
-            self.mask_show()
+        if inplace:
+            self.mask = mask
+
+        return mask
 
     @staticmethod
     def intensity_threshold_shared(stacks, threshold, sigma=5):
