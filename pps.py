@@ -406,14 +406,16 @@ class PPS:
         """
         # average over whole stack
         if size == -1:
-            ta_curves = [self.avg(norm=norm, maskOn=maskOn)]
+            ta_curves = np.array([np.array(self.avg(norm=norm, maskOn=maskOn)).ravel()])
         # average over substacks of given size
         else:
             # compute substacks and average TA curves
             substacks = self.substacks(size=size, cutoff=cutoff)
-            ta_curves = [i.avg(norm=norm, maskOn=maskOn) for i in substacks]
+            ta_curves = [
+                np.array(i.avg(norm=norm, maskOn=maskOn)).ravel() for i in substacks
+            ]
 
-            return ta_curves
+        return ta_curves
 
     def avg_show(self, maskOn=True, norm=None):
         fig, ax = plt.subplots()
