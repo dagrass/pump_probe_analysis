@@ -9,6 +9,7 @@ import os
 import matplotlib.pyplot as plt
 import matplotlib as mlp
 from skimage import io
+from skimage.transform import downscale_local_mean
 import re
 
 
@@ -306,7 +307,7 @@ class PPS:
         self.times = self.times[pos]
         self.images = self.images[pos]
 
-    def subtractFirst(self, n=1):
+    def subtractFirst(self, n=1, inplace=True):
         """
         Subtract (average) of first n images from stack.
 
@@ -321,7 +322,16 @@ class PPS:
 
         """
         mean = np.mean(self.images[:n], axis=0)
-        self.images = self.images - mean
+        images_subtracted = self.images - mean
+        if inplace:
+            self.images = images_subtracted
+
+        return PPS(
+            [images_subtracted, self.times],
+            mask=self.mask,
+            filename=self.filename,
+            dataType="data",
+        )
 
     def normalize(self, norm="minmax", inPlace=False):
         """
@@ -563,7 +573,21 @@ class PPS:
 
         return stacks
 
-    def downsample(self, size):
+    def downsample(self, size, obsolte_version=False):
+        if obsolte_version:
+            return self.downsample_obsolete(size)
+
+        images_ds = [downscale_local_mean(img, (size, size)) for img in self.images]
+        mask_ds = downscale_local_mean(self.mask.astype(float), (size, size)) > 0
+
+        return PPS(
+            [images_ds, self.times],
+            dataType="data",
+            filename=self.filename,
+            mask=mask_ds,
+        )
+
+    def downsample_obsolete(self, size):
         """
         Downsample stack by factor size.
 
