@@ -1,7 +1,59 @@
 # -*- coding: utf-8 -*-
 """
-Created on Thu May 11 14:25:04 2023
+Pump-Probe Spectroscopy (PPS) Analysis Module
 
+This module provides comprehensive tools for analyzing pump-probe spectroscopy imaging data,
+with a focus on time-resolved transient absorption microscopy.
+
+Classes
+-------
+PPS
+    Main class for pump-probe stack analysis and visualization. Handles data import from
+    multiple formats (DukeScan, Mathematica, pickle), processing (normalization, masking,
+    downsampling), and analysis (phasor, classification, thresholding).
+
+Functions
+---------
+main
+    Example usage and testing function demonstrating phasor analysis workflow.
+
+Key Features
+------------
+- Import from multiple data formats (DukeScan, Mathematica, pickle)
+- Time delay selection and averaging
+- Background subtraction and normalization
+- Spatial masking and ROI analysis
+- Phasor analysis for frequency domain visualization
+- Machine learning classification support
+- Intensity threshold-based segmentation
+- Image projection and downsampling
+- Linear combination of multiple stacks
+
+Example Usage
+-------------
+>>> # Load a pump-probe stack from DukeScan format
+>>> stack = PPS("data_DS_CH1.tif", dataType="DukeScan")
+>>>
+>>> # Subtract background and normalize
+>>> stack.subtractFirst(n=3)
+>>> stack.normalize(norm="minmax")
+>>>
+>>> # Apply intensity threshold masking
+>>> stack.intensity_threshold(threshold=0.1, sigma=5)
+>>>
+>>> # Perform phasor analysis
+>>> phasor_data = stack.phasor(freq=0.25, remove_zero=True)
+>>> stack.phasor_show(freq=0.25)
+>>>
+>>> # Save processed stack
+>>> stack.save("processed_stack.pkl")
+
+Notes
+-----
+The PPS class maintains image stacks with associated time delays and spatial masks.
+All analysis methods respect the mask attribute to focus on regions of interest.
+
+Created on Thu May 11 14:25:04 2023
 @author: david
 """
 import numpy as np
@@ -123,19 +175,20 @@ class PPS:
 
     @staticmethod
     def time_delays(fn):
-        """
-        Import time delaus from log file or x-axis file (older stacks).
+        """Import time delays from DukeScan log file or legacy x-axis file.
+
+        Reads time delay information from either a newer .log file or an older
+        _xaxis.txt file associated with DukeScan TIFF stacks.
 
         Parameters
         ----------
         fn : str
-            Filename of pp stack (Tif file).
+            Filename of pump-probe stack (TIFF file) from DukeScan.
 
         Returns
         -------
-        times : np array of float
-            Time delays.
-
+        np.ndarray
+            1D array of time delays in picoseconds.
         """
         # check if (older) x-axis file still exists
         fn_new = fn.replace(".tif", "_xaxis.txt")
@@ -175,6 +228,20 @@ class PPS:
 
     @staticmethod
     def _substack_index_1d(size_image, size_sub):
+        """Compute 1D substack indices for dividing an image dimension.
+
+        Parameters
+        ----------
+        size_image : int
+            Total size of the image dimension.
+        size_sub : int
+            Size of each sub-image along this dimension.
+
+        Returns
+        -------
+        np.ndarray
+            2D array where each row contains [start_index, end_index] for a sub-image.
+        """
         # comput number of sub images along 1-d
         n_sub_images = int(np.ceil(size_image / size_sub))
 
@@ -187,17 +254,39 @@ class PPS:
         return np.array(index)
 
     def _substack_index(self, size):
+        """Compute 2D substack indices for both image dimensions.
+
+        Parameters
+        ----------
+        size : int
+            Size of each sub-image in both x and y dimensions.
+
+        Returns
+        -------
+        list
+            List containing [index_x, index_y] where each is a 2D array of indices.
+        """
         index_x = PPS._substack_index_1d(self.image_dimensions[0], size)
         index_y = PPS._substack_index_1d(self.image_dimensions[1], size)
         return [index_x, index_y]
 
     @staticmethod
     def import_stack_mathematica(filename):
-        """Load stack saved in david's mathematica format.
+        """Load pump-probe stack saved in Mathematica binary format.
 
-        filename is the name of the file that should be imported
-        function returns a stack in david's mathematica convention
-        stack = [[img(t=t0), img(t=t1), ...], timeAxis]
+        The format consists of binary data with dimensions followed by time axis
+        and image data. Images are stored as float64 values.
+
+        Parameters
+        ----------
+        filename : str
+            Path to the Mathematica format file.
+
+        Returns
+        -------
+        list
+            List containing [images, time_axis] where images is a list of 2D arrays
+            and time_axis is a 1D array of time delays.
         """
         # open file as read-binary with no buffering
         f = open(filename, "rb", buffering=0)
@@ -224,6 +313,22 @@ class PPS:
         return [images, time]
 
     def average_times(self, time_averages):
+        """Average multiple time delay images together to reduce noise.
+
+        This method replaces the original time delays and images with averaged
+        versions based on the specified groupings.
+
+        Parameters
+        ----------
+        time_averages : list of lists
+            Each inner list contains time delay values to be averaged together.
+            Example: [[0.1, 0.15], [0.5, 0.55]] will create two new averaged images.
+
+        Returns
+        -------
+        None
+            Modifies self.times and self.images in place.
+        """
         # find indicies of time delays to be averaged -> positions
         positions = []
         for j in time_averages:
@@ -244,22 +349,34 @@ class PPS:
         self.times = new_times
         self.images = np.array(new_images)
 
-    def select_delays(self, delays="melanoma1"):
-        """
-        Select time delays of image stack.
+    def select_delays(self, delays="melanoma1", inplace=True):
+        """Select and filter specific time delays from the image stack.
 
-        Parameters----------
-        delays : TYPE, str or list of float
-            DESCRIPTION. The default is "melanoma1".
-            "melanoma1" = [-1.0, -0.5, -0.1, 0.0, 0.1, 0.25, 0.5, 0.6, 0.7,
-                           0.8, 0.9, 1.0, 2.5, 2.0, 3.0, 3.5, 4.0, 4.5, 5.0,
-                           6.0, 7.0, 8.0, 9.0, 10.0, 15.0, 20.0, 29.0, 40.0,
-                           50.0, 60.0, 70.0, 80.0]
-            otherwise it can just be alist of time delays
+        Reduces the stack to only the specified time delays, useful for
+        focusing analysis on specific time windows.
+
+        Parameters
+        ----------
+        delays : str or list of float, optional
+            Time delays to keep. If "melanoma1", uses a predefined set of
+            delays optimized for melanoma analysis. Otherwise, provide a list
+            of time delay values (in ps) to retain. Default is "melanoma1".
+
+            The "melanoma1" preset includes delays:
+            [-1.0, -0.5, -0.1, 0.0, 0.1, 0.25, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
+             2.5, 2.0, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
+             15.0, 20.0, 29.0, 40.0, 50.0, 60.0, 70.0, 80.0]
+        inplace : bool, optional
+            If True, modifies this instance's times and images in place.
+            Default is True.
+
         Returns
         -------
-        None.
-
+        PPS
+            A PPS instance with the selected time delays. If inplace is True,
+            the current instance is modified and a new instance with the same
+            data is returned. If inplace is False, the current instance remains
+            unchanged and a new instance with selected delays is returned.
         """
         # check if delays are standard delays for machine learning melanoma
         # attempts
@@ -304,22 +421,37 @@ class PPS:
             pos.append(np.where(self.times == i)[0][0])
 
         # redefine time delays and image stacks
-        self.times = self.times[pos]
-        self.images = self.images[pos]
+        if inplace:
+            self.times = self.times[pos]
+            self.images = self.images[pos]
+
+        return PPS(
+            [self.images[pos], self.times[pos]], 
+            mask=self.mask, 
+            filename=self.filename, 
+            dataType="data"
+        )
 
     def subtractFirst(self, n=1, inplace=True):
-        """
-        Subtract (average) of first n images from stack.
+        """Subtract average of first n images from entire stack.
+
+        Performs background subtraction by removing the average of early time
+        delays (typically negative delays before pump pulse arrives).
 
         Parameters
         ----------
         n : int, optional
-            Number of stacks to be averaged and subtracted. The default is 1.
+            Number of initial images to average for background subtraction.
+            Default is 1.
+        inplace : bool, optional
+            If True, modifies this instance. If False, returns new instance.
+            Default is True.
 
         Returns
         -------
-        None.
-
+        PPS
+            Background-subtracted stack. Returns self if inplace=True, otherwise
+            returns new PPS instance.
         """
         mean = np.mean(self.images[:n], axis=0)
         images_subtracted = self.images - mean
@@ -340,15 +472,17 @@ class PPS:
         Parameters
         ----------
         norm : str, optional
-            Norm to be used. The default is "minmax".
-        inPlace : TYPE, optional
-            If True this instance will be normalized. The default is False.
+            Normalization method. Currently supports 'minmax' which normalizes
+            by the maximum absolute value. Default is 'minmax'.
+        inPlace : bool, optional
+            If True, modifies this instance in place. If False, returns a new
+            normalized PPS instance. Default is False.
 
         Returns
         -------
-        pp stack
-            Returns normalized stack.
-
+        PPS
+            Normalized PPS stack. If inPlace is True, returns self; otherwise
+            returns a new instance.
         """
         if norm is None:
             pass
@@ -428,6 +562,20 @@ class PPS:
         return ta_curves
 
     def avg_show(self, maskOn=True, norm=None):
+        """Display the average transient absorption curve.
+
+        Parameters
+        ----------
+        maskOn : bool, optional
+            If True, use mask for computation. Default is True.
+        norm : str, optional
+            Normalization method (e.g., 'minmax'). Default is None.
+
+        Returns
+        -------
+        None
+            Displays a matplotlib plot.
+        """
         fig, ax = plt.subplots()
         ax.plot(self.times, self.avg(maskOn=maskOn, norm=norm))
         plt.show()
@@ -537,25 +685,34 @@ class PPS:
                 self.mask[i] = False
 
     def count_nonzero_pixel(self):
+        """Count the number of non-zero pixels in the stack projection.
+
+        Returns
+        -------
+        int
+            Number of non-zero pixels in the projected stack.
+        """
         return np.count_nonzero(self.project())
 
     def substacks(self, size, cutoff=0):
-        """
-        Retrun substacks of size.
+        """Divide stack into smaller spatial substacks.
+
+        Creates non-overlapping substacks of specified size, useful for
+        analyzing spatial heterogeneity or processing large images in chunks.
 
         Parameters
         ----------
         size : int
-            Length of substack.
+            Side length of square substacks in pixels.
         cutoff : int, optional
-            If substack has less than cutoff non-zero pixel this substack in
-            particular is discarded. The default is 0.
+            Minimum number of non-zero pixels required for a substack to be
+            included in the output. Default is 0 (include all).
 
         Returns
         -------
-        stacks : TYPE
-            DESCRIPTION.
-
+        list of PPS
+            List of PPS instances, each containing a spatial subregion of the
+            original stack with the same time delays.
         """
         stacks = []
         [index_x, index_y] = self._substack_index(size)
@@ -574,6 +731,23 @@ class PPS:
         return stacks
 
     def downsample(self, size, obsolete_version=False):
+        """Downsample the stack to reduce resolution and improve SNR.
+
+        Uses local mean downsampling to average neighboring pixels, reducing
+        spatial resolution while improving signal-to-noise ratio.
+
+        Parameters
+        ----------
+        size : int
+            Downsampling factor. Each dimension is reduced by this factor.
+        obsolete_version : bool, optional
+            If True, use the older implementation. Default is False.
+
+        Returns
+        -------
+        PPS
+            New downsampled PPS instance with reduced image dimensions.
+        """
         if obsolete_version:
             return self.downsample_obsolete(size)
 
@@ -646,6 +820,28 @@ class PPS:
         )
 
     def classify(self, classifier, downsample=1, norm="minmax"):
+        """Classify each pixel using a trained classifier.
+
+        Applies a machine learning classifier to the transient absorption curve
+        of each pixel to identify different material types or states.
+
+        Parameters
+        ----------
+        classifier : sklearn classifier
+            Trained classifier with predict() method and classes_ attribute.
+        downsample : int, optional
+            Downsampling factor before classification. Default is 1 (no downsampling).
+        norm : str, optional
+            Normalization method for TA curves. Default is 'minmax'.
+
+        Returns
+        -------
+        None
+            Results stored in self.results dictionary with keys:
+            'pigments' : class names
+            'stats' : classification statistics
+            'matrix' : 2D array of class assignments
+        """
         # generate 1 pixel stacks of downasmpled stack
         stack_ds = self.downsample(downsample)
         stacks = stack_ds.substacks(1, cutoff=-1)
@@ -689,6 +885,22 @@ class PPS:
         self.results["matrix"] = result_matrix
 
     def classify_accuracy(self, correct_classes):
+        """Compute classification accuracy for known correct classes.
+
+        Evaluates how well the classification identified the expected classes
+        in the sample.
+
+        Parameters
+        ----------
+        correct_classes : list of str
+            List of class names that should be present in the sample.
+
+        Returns
+        -------
+        None
+            Updates self.results['stats'] with 'correct_identified' and
+            'correct_percentage' keys.
+        """
         # check if stack has been classified already
         correct_percentage = 0
         correct_identified = []
@@ -712,6 +924,29 @@ class PPS:
     def classify_show(
         self, classifier, downsample=1, norm="minmax", export=None, alpha=1
     ):
+        """Classify and display false-color classification map.
+
+        Runs classification and creates a visualization showing which class
+        was assigned to each pixel.
+
+        Parameters
+        ----------
+        classifier : sklearn classifier
+            Trained classifier with predict() method and classes_ attribute.
+        downsample : int, optional
+            Downsampling factor before classification. Default is 1.
+        norm : str, optional
+            Normalization method for TA curves. Default is 'minmax'.
+        export : str, optional
+            If provided, saves the figure to this filename. Default is None.
+        alpha : float, optional
+            Transparency of the classification overlay. Default is 1 (opaque).
+
+        Returns
+        -------
+        None
+            Displays a matplotlib figure with color-coded classification results.
+        """
         n = len(classifier.classes_)
 
         # classify stack with classifier
@@ -766,21 +1001,25 @@ class PPS:
             plt.show()
 
     def phasor(self, freq=0.25, remove_zero=False):
-        """
-        Compute phasor.
+        """Compute phasor coordinates for all pixels.
+
+        Transforms time-domain TA curves into frequency-domain phasor
+        representation (g, s) coordinates. Useful for visualizing dynamics
+        and identifying different decay patterns.
 
         Parameters
         ----------
-        freq : TYPE, optional
-            phasor frequency in THz. The default is 0.25.
-        remove_zero : TYPE, optional
-            remove all zero-pixel. The default is False.
+        freq : float, optional
+            Phasor analysis frequency in THz. Default is 0.25 THz.
+        remove_zero : bool, optional
+            If True, exclude pixels with all-zero TA curves from analysis.
+            Default is False.
 
         Returns
         -------
-        TYPE
-            list of phasor coordinates.
-
+        np.ndarray
+            2D array of phasor coordinates [g, s] for each pixel. Shape is
+            (n_pixels, 2).
         """
         # define sin, cos of time delays, and prepare list containing TA curve
         # of each pixel
@@ -796,22 +1035,25 @@ class PPS:
         return self.phasor_coor
 
     def phasor_show(self, freq=0.25, remove_zero=True, color="red"):
-        """
-        Compute and show phasor.
+        """Compute and display phasor plot with semicircular boundaries.
+
+        Creates a 2D histogram of phasor coordinates overlaid on the universal
+        semicircle, which represents the theoretical bounds for single-exponential
+        decay processes.
 
         Parameters
         ----------
-        freq : TYPE, optional
-            phasor frequency in THz. The default is 0.25.
-        remove_zero : TYPE, optional
-            remove all zero-pixel. The default is True.
-        color : TYPE, optional
-            color of phasor plot. The default is "red".
+        freq : float, optional
+            Phasor analysis frequency in THz. Default is 0.25 THz.
+        remove_zero : bool, optional
+            If True, exclude pixels with all-zero TA curves. Default is True.
+        color : str, optional
+            Base color for the phasor histogram. Default is 'red'.
 
         Returns
         -------
-        None.
-
+        None
+            Displays a matplotlib figure.
         """
         # compute phasor
         self.phasor(freq=freq, remove_zero=remove_zero)
@@ -855,6 +1097,18 @@ class PPS:
         plt.show()
 
     def _phasor_flatten_stack(self, remove_zero=False):
+        """Flatten stack into array of transient absorption curves.
+
+        Parameters
+        ----------
+        remove_zero : bool, optional
+            If True, remove pixels with all-zero TA curves. Default is False.
+
+        Returns
+        -------
+        np.ndarray
+            2D array where each row is a TA curve for one pixel.
+        """
         # flatten images into list of TA curves
         ta_curves = self.images.reshape(len(self.times), -1).T
         if remove_zero is True:
@@ -863,6 +1117,21 @@ class PPS:
         return ta_curves
 
     def _phasor_compute(self, ta_curve):
+        """Compute phasor coordinates for a single TA curve.
+
+        Calculates the real (g) and imaginary (s) phasor coordinates by
+        projecting the TA curve onto cosine and sine basis functions.
+
+        Parameters
+        ----------
+        ta_curve : np.ndarray
+            1D array containing the transient absorption values at each time delay.
+
+        Returns
+        -------
+        np.ndarray
+            Array [g, s] containing the phasor coordinates.
+        """
         norm = np.sum(np.abs(ta_curve))
         phasor_coor = np.array(
             [
@@ -1024,25 +1293,28 @@ class PPS:
 
     @staticmethod
     def linear_combination(stack1, coeff1, stack2, coeff2):
-        """
-        Compute linear combination of stack1 and stack2.
+        """Compute linear combination of two pump-probe stacks.
+
+        Creates a new stack from the weighted sum of two input stacks. Useful
+        for background subtraction, signal averaging, or creating difference
+        maps. Time delays must match between stacks.
 
         Parameters
         ----------
-        stack1 : pp stack
-            stack1 for linear combination.
-        coeff1 : numeric
-            coefficient for stack1.
-        stack2 : pp stack
-            stack2 for linear combination.
-        coeff2 : TYPE
-            coefficient for stack2.
+        stack1 : PPS
+            First stack for linear combination.
+        coeff1 : float
+            Coefficient (weight) for stack1.
+        stack2 : PPS
+            Second stack for linear combination.
+        coeff2 : float
+            Coefficient (weight) for stack2.
 
         Returns
         -------
-        pp stack
-            linear combination coeff1 * stack1 + coeff2 * stack2.
-
+        PPS or None
+            New PPS instance containing coeff1 * stack1 + coeff2 * stack2.
+            Returns None if time delays don't match between stacks.
         """
         if np.allclose(stack1.times, stack2.times):
             images = coeff1 * stack1.images + coeff2 * stack2.images
@@ -1054,33 +1326,6 @@ class PPS:
 
 
 def main():
-    # path1 = ("W:/Data/CutaneousMelanoma/sample_set_Elpis/N93/"
-    #          + "20210628_770_730_N93_1_C01-ROI03_evaluation/")
-
-    path1 = "W:\\Data\\CutaneousMelanoma\\sample_set_Elpis\\P75\\20210728_770_730_P75_1_C01-ROI07"
-    filename = path1 + "preProcessed_v032.erg"
-
-    # os.chdir("C:/Users/david/OneDrive/todo/programming/python/python")
-    os.chdir(path1)
-
-    t1 = PPS("preProcessed_v032.erg")
-    print(t1.count_nonzero_pixel())
-
-    phasor1 = t1.phasor(freq=0.25, remove_zero=True)
-    phasor2 = t1.phasor(freq=0.1, remove_zero=True)
-    fig, ax = plt.subplots(1, 1)
-    ax.plot(phasor1[:, 0], phasor1[:, 1])
-    ax.plot(phasor2[:, 0], phasor2[:, 1])
-
-    plt.show()
-    print(t1.phasor(remove_zero=True))
-    # p1 = t1.phasor(remove_zero=True)
-    # print(len(p1), p1)
-
-    # fig, ax = plt.subplots(1, 1)
-    # for i in t1.ta_curves[:10]:
-    #   ax.plot(t1.times, i)
-    # plt.show()
 
 
 if __name__ == "__main__":
