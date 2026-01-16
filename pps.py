@@ -426,10 +426,10 @@ class PPS:
             self.images = self.images[pos]
 
         return PPS(
-            [self.images[pos], self.times[pos]], 
-            mask=self.mask, 
-            filename=self.filename, 
-            dataType="data"
+            [self.images[pos], self.times[pos]],
+            mask=self.mask,
+            filename=self.filename,
+            dataType="data",
         )
 
     def subtractFirst(self, n=1, inplace=True):
@@ -1325,7 +1325,7 @@ class PPS:
             return None
 
 
-def main():
+def main(): ...
 
 
 if __name__ == "__main__":
