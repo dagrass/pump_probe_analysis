@@ -1,0 +1,57 @@
+[Comments]
+Comment_00 =  +
+Comment_01 =   
+Comment_02 = wide reserve: normal
+Comment_03 = 
+
+[Experimenter]
+Name = David Grass
+
+[LogDetail]
+epiMode = 1
+filters = HQ850/80
+lockinExpand = 1
+lockinSens = 1000
+logDetailEnabled = 1
+objective = 20X, 0.7 NA, Olympus
+probePolarization = 00
+probePower = 0.2
+probeWavelength = 817
+pumpPolarization = 00
+pumpPower = 0.3
+pumpWavelength = 720
+sampleName = kartoffelsalat
+
+[ScanConfig]
+blankDelay = 0
+blankEnabled = 0
+chName_0 = Pump-Probe X
+frameSize_X = 256
+frameSize_Y = 256
+nSampsPerPx = 1
+numChannels = 1
+pixelRate = 20000
+scale_X_um_per_V = 360
+scale_Y_um_per_V = 360
+scanAmp_X = 0.4300000071525574
+scanAmp_Y = 0.4300000071525574
+scanBiDirectional = 0
+syncAllPx = 0
+syncEnabled = 1
+
+[StackConfig]
+baseFileName = example_stack
+date = 03-15-2022
+time = 11:13:14
+fileType = DS
+fileVersion = 1
+multiDelay = 1
+multiDepth = 0
+multiSection = 0
+mosaic = 0
+frameAverages = 1
+delayArr_ps = -5.000,-4.000,-2.000,-0.500,-0.200,-0.100,-0.050,0.000,0.050,0.150,0.200,0.500,0.900,2.000,4.000,6.000,8.000,10.000,15.000,20.000,30.000,50.000,70.000,90.000,110.000
+
+[File_0000]
+fileName = example_stack
+positions = 0.00 0.00 0.00 0.00 0
