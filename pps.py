@@ -63,11 +63,12 @@ import matplotlib as mlp
 from skimage import io
 from skimage.transform import downscale_local_mean
 import re
+from pathlib import Path
 
 
 class PPS:
 
-    def __init__(self, data, dataType="data", filename="unkown", mask=None):
+    def __init__(self, data, dataType="DukeScan", filename="unkown", mask=None):
         """
         Import pump-probe stack.
 
@@ -93,7 +94,7 @@ class PPS:
         """
         if dataType == "mathematica":
             if isinstance(data, str):
-                temp = PPS.import_stack_mathematica(data)
+                temp = PPS._import_stack_mathematica(data)
                 self.images = np.array(temp[0], dtype=np.float64)
                 self.times = np.array(temp[1])
                 self.filename = data
@@ -104,6 +105,10 @@ class PPS:
                 self.mask = self.project(maskOn=False) != 0
 
         elif dataType == "DukeScan":
+            # convert Path to string because skimage.io.imread_collection does not accept Path objects
+            if isinstance(data, Path):
+                data = str(data)
+
             self.images = np.array(io.imread_collection(data)[0], dtype=np.float64)
             self.times = PPS.time_delays(data)
             self.filename = data
@@ -126,6 +131,9 @@ class PPS:
             self.mask = save_object["mask"]
 
         elif dataType == "data":
+            if isinstance(data, (str, Path, os.PathLike)):
+                print("Data is a string or PathLike, expected [images, delays] array.")
+                return None
             self.images = np.array(data[0], dtype=np.float64)
             self.times = np.array(data[1])
             self.filename = filename
@@ -271,7 +279,7 @@ class PPS:
         return [index_x, index_y]
 
     @staticmethod
-    def import_stack_mathematica(filename):
+    def _import_stack_mathematica(filename):
         """Load pump-probe stack saved in Mathematica binary format.
 
         The format consists of binary data with dimensions followed by time axis
@@ -312,7 +320,7 @@ class PPS:
 
         return [images, time]
 
-    def average_times(self, time_averages):
+    def average_times(self, time_averages, inplace=True):
         """Average multiple time delay images together to reduce noise.
 
         This method replaces the original time delays and images with averaged
@@ -323,11 +331,17 @@ class PPS:
         time_averages : list of lists
             Each inner list contains time delay values to be averaged together.
             Example: [[0.1, 0.15], [0.5, 0.55]] will create two new averaged images.
+        inplace : bool, optional
+            If True, modifies this instance's times and images in place.
+            Default is True.
 
         Returns
         -------
-        None
-            Modifies self.times and self.images in place.
+        PPS
+            A PPS instance with the averaged times and images. If inplace is True,
+            the current instance is modified and a new instance with the same
+            data is returned. If inplace is False, the current instance remains
+            unchanged and a new instance with averaged data is returned.
         """
         # find indicies of time delays to be averaged -> positions
         positions = []
@@ -346,8 +360,16 @@ class PPS:
             new_images.append(np.mean(self.images[i], axis=0))
 
         # redefine time delays and image stacks
-        self.times = new_times
-        self.images = np.array(new_images)
+        if inplace:
+            self.times = new_times
+            self.images = np.array(new_images)
+
+        return PPS(
+            [np.array(new_images), np.array(new_times)],
+            mask=self.mask,
+            filename=self.filename,
+            dataType="data",
+        )
 
     def select_delays(self, delays="melanoma1", inplace=True):
         """Select and filter specific time delays from the image stack.
@@ -561,24 +583,36 @@ class PPS:
 
         return ta_curves
 
-    def avg_show(self, maskOn=True, norm=None):
+    def avg_show(self, maskOn=True, norm=None, ax=None):
         """Display the average transient absorption curve.
-
         Parameters
         ----------
         maskOn : bool, optional
             If True, use mask for computation. Default is True.
         norm : str, optional
             Normalization method (e.g., 'minmax'). Default is None.
-
+        ax : matplotlib.axes.Axes, optional
+            Axes to plot on. If None, creates new figure.
         Returns
         -------
-        None
-            Displays a matplotlib plot.
+        matplotlib.axes.Axes
+            The axes object containing the plot.
         """
-        fig, ax = plt.subplots()
+        if ax is None:
+            fig, ax = plt.subplots()
+            show_plot = True
+        else:
+            show_plot = False
+
         ax.plot(self.times, self.avg(maskOn=maskOn, norm=norm))
-        plt.show()
+        ax.set_xlabel("Time")
+        ax.set_ylabel("$\Delta A$")
+        ax.grid(True)
+
+        if show_plot:
+            plt.show()
+
+        return ax
 
     def project(self, maskOn=True):
         """
@@ -628,40 +662,47 @@ class PPS:
 
         return total
 
-    def project_show(self, maskOn=True, export=None):
+    def project_show(self, maskOn=True, export=None, ax=None):
         """
         Display pp stack projection.
-
         Parameters
         ----------
         maskOn : Boolean, optional
             Use mask. The default is True.
         export : str, optional
             Saves plot into export. The default is None.
-
+        ax : matplotlib.axes.Axes, optional
+            Axes to plot on. If None, creates new figure.
         Returns
         -------
-        None.
-
+        matplotlib.axes.Axes
+            The axes object containing the plot.
         """
         # Choose a base colormap
         base_cmap = mlp.cm.get_cmap("viridis")
-
         # Create a new colormap from the base, setting the first color (for 0)
         # to white
         new_colors = base_cmap(np.linspace(0, 1, 256))
         new_colors[0, :] = np.array([1, 1, 1, 1])  # RGBA for white
         new_cmap = mlp.colors.ListedColormap(new_colors)
 
-        fig, ax = plt.subplots()
-        cax = ax.imshow(self.project(maskOn=maskOn), cmap=new_cmap)
-        fig.colorbar(cax)
-
-        if export is None:
-            plt.show()
+        if ax is None:
+            fig, ax = plt.subplots()
+            show_plot = True
         else:
+            fig = ax.get_figure()
+            show_plot = False
+
+        cax = ax.imshow(self.project(maskOn=maskOn), cmap=new_cmap)
+        fig.colorbar(cax, ax=ax)  # Specify which ax the colorbar is for
+
+        if export is not None:
             plt.savefig(export, transparent=True)
+
+        if show_plot:
             plt.show()
+
+        return ax
 
     def mask_slices(self, slices):
         """
@@ -749,7 +790,7 @@ class PPS:
             New downsampled PPS instance with reduced image dimensions.
         """
         if obsolete_version:
-            return self.downsample_obsolete(size)
+            return self._downsample_obsolete(size)
 
         images_ds = [downscale_local_mean(img, (size, size)) for img in self.images]
         mask_ds = downscale_local_mean(self.mask.astype(float), (size, size)) > 0
@@ -761,7 +802,7 @@ class PPS:
             mask=mask_ds,
         )
 
-    def downsample_obsolete(self, size):
+    def _downsample_obsolete(self, size):
         """
         Downsample stack by factor size.
 
@@ -1034,13 +1075,11 @@ class PPS:
 
         return self.phasor_coor
 
-    def phasor_show(self, freq=0.25, remove_zero=True, color="red"):
+    def phasor_show(self, freq=0.25, remove_zero=True, color="red", ax=None):
         """Compute and display phasor plot with semicircular boundaries.
-
         Creates a 2D histogram of phasor coordinates overlaid on the universal
         semicircle, which represents the theoretical bounds for single-exponential
         decay processes.
-
         Parameters
         ----------
         freq : float, optional
@@ -1049,15 +1088,15 @@ class PPS:
             If True, exclude pixels with all-zero TA curves. Default is True.
         color : str, optional
             Base color for the phasor histogram. Default is 'red'.
-
+        ax : matplotlib.axes.Axes, optional
+            Axes to plot on. If None, creates new figure.
         Returns
         -------
-        None
-            Displays a matplotlib figure.
+        matplotlib.axes.Axes
+            The axes object containing the plot.
         """
         # compute phasor
         self.phasor(freq=freq, remove_zero=remove_zero)
-
         # compute semi circle
         theta = np.linspace(-(np.pi) / 2, np.pi / 2, 100)
         x1 = (1 - np.sin(theta)) / 2
@@ -1066,18 +1105,20 @@ class PPS:
         y2 = -np.cos(-theta) / 2
         x = np.concatenate((x1, x2))
         y = np.concatenate((y1, y2))
-
         # define false color scheme
         colors = [
             (plt.cm.colors.to_rgba(color, alpha)) for alpha in np.linspace(0, 1, 256)
         ]
         cmapp = mlp.colors.LinearSegmentedColormap.from_list("transparent_red", colors)
 
-        fig, ax = plt.subplots(1, 1)
+        if ax is None:
+            fig, ax = plt.subplots(1, 1)
+            show_plot = True
+        else:
+            show_plot = False
 
         # plot semicircle
         ax.plot(x, y, linestyle="dashed", color="grey")
-
         # plot phasor histogram
         ax.hist2d(
             self.phasor_coor[:, 0],
@@ -1085,7 +1126,6 @@ class PPS:
             bins=(np.arange(-1, 1, 0.01), np.arange(-1, 1, 0.01)),
             cmap=cmapp,
         )
-
         # other plot settings
         ax.set_aspect("equal")  # Set the aspect ratio to equal
         ax.grid(True)
@@ -1094,7 +1134,11 @@ class PPS:
         ax.set_xlim(-1, 1)
         ax.set_ylim(-1, 1)
         ax.set_title("phasor frequency: " + str(self.freq / 2 / np.pi))
-        plt.show()
+
+        if show_plot:
+            plt.show()
+
+        return ax
 
     def _phasor_flatten_stack(self, remove_zero=False):
         """Flatten stack into array of transient absorption curves.
@@ -1153,7 +1197,7 @@ class PPS:
         Parameters
         ----------
         threshold : str or number, optional
-            If Li a Li threshold cutoff is used, if numeric this nymber is used
+            If Li a Li threshold cutoff is used, if numeric this number is used
             as cutoff for the mask. The default is 'Li'.
         sigma : numeric, optional
             Gaussian filter sigma. The default is 5.
@@ -1194,7 +1238,7 @@ class PPS:
     @staticmethod
     def intensity_threshold_shared(stacks, threshold, sigma=5):
         """
-        Return intensityold mask based on multiple pump-probe stacks.
+        Return intensity threshold mask based on multiple pump-probe stacks.
 
         Absolute value of all images in all stacks are summed up, Gaussian
         filtered and intensity thresholded with cutoff.
@@ -1277,12 +1321,12 @@ class PPS:
         """
         Update mask of stack with mask.
 
-        The mask propperty of this stack is updated (logical and) with mask.
+        The mask property of this stack is updated (logical and) with mask.
 
         Parameters
         ----------
-        mask : arry of bool
-            Mask to be updtaed with.
+        mask : array of bool
+            Mask to be updated with.
 
         Returns
         -------
