@@ -57,6 +57,7 @@ Created on Thu May 11 14:25:04 2023
 @author: david
 """
 import numpy as np
+import pandas as pd
 import os
 import matplotlib.pyplot as plt
 import matplotlib as mlp
@@ -64,32 +65,46 @@ from skimage import io
 from skimage.transform import downscale_local_mean
 import re
 from pathlib import Path
+import tifffile
 
 
 class PPS:
 
     def __init__(self, data, dataType="DukeScan", filename="unkown", mask=None):
         """
-        Import pump-probe stack.
+        Import and initialize a pump-probe stack.
+
+        Supports multiple input formats including DukeScan TIFF files (including
+        stitched ImageJ files), Mathematica binary format, pickle files, and raw
+        [images, delays] arrays. Automatically extracts time delays and generates
+        a mask based on non-zero pixels.
 
         Parameters
         ----------
-        data : str or [images, delays]
-            If str must be a filename of DukeScan, mathematica, or pickle pps
-            file. Otherwise data in form of [images, delays].
+        data : str, Path, or [images, delays]
+            If str or Path: filename of DukeScan (.tif), Mathematica, or pickle
+            (.pkl) file. For DukeScan, handles both standard and stitched ("stich")
+            files. If array: data in form of [images, delays].
         dataType : str, optional
-            Either mathematica, DukeScan, pickle, or data. The default is
-            "data".
+            Format type: "mathematica", "DukeScan", "pickle", or "data".
+            Default is "DukeScan".
         filename : str, optional
-            If dataType=data, this string is saved as the filename of the pps
-            instance. The default is "unkown".
-        mask : np.bool_, optional
-            This array is set as mask of this pps instance. The default is
-            None.
+            If dataType="data", this string is saved as the filename attribute.
+            Default is "unkown".
+        mask : np.ndarray of bool, optional
+            Boolean array to set as the mask. If None, automatically generates
+            mask from non-zero pixels in the projected image. Default is None.
 
         Returns
         -------
         None.
+
+        Notes
+        -----
+        For DukeScan files, time delays are extracted using time_delays() which
+        checks for _xaxis.txt files, TIFF tags, or .log files in that order.
+        Stitched files (containing "stich" in filename) are read with tifffile
+        to handle different TIFF levels.
 
         """
         if dataType == "mathematica":
@@ -109,10 +124,22 @@ class PPS:
             if isinstance(data, Path):
                 data = str(data)
 
-            self.images = np.array(io.imread_collection(data)[0], dtype=np.float64)
             self.times = PPS.time_delays(data)
+
+            # pump-probe stacks that were stitched together with ImageJ have less levels compared with
+            # with DukeScan generated files. Also I introduced a typo into all filenames, I know it
+            # should be stitched instead of stich...
+            if "stich" in data:
+                with tifffile.TiffFile(str(data)) as tif:
+                    self.images = np.array(
+                        [page.asarray() for page in tif.pages], dtype=np.float64
+                    )
+            else:
+                self.images = np.array(io.imread_collection(data)[0], dtype=np.float64)
+
             self.filename = data
             self.image_dimensions = self.images[0].shape
+
             # check if there are 0 value pixel and derive mask
             # becasue there is no mask array yet we can obviously not use it to
             # create the mask here:
@@ -183,38 +210,85 @@ class PPS:
 
     @staticmethod
     def time_delays(fn):
-        """Import time delays from DukeScan log file or legacy x-axis file.
+        """Import time delays from DukeScan files with cascading fallback.
 
-        Reads time delay information from either a newer .log file or an older
-        _xaxis.txt file associated with DukeScan TIFF stacks.
+        Attempts to read time delay information using multiple methods in order:
+        1. Legacy _xaxis.txt file (older format)
+        2. TIFF tags embedded in the TIFF file (via delays_from_tiff)
+        3. DukeScan .log file (via delays_from_log)
+
+        Returns an empty array if all methods fail.
 
         Parameters
         ----------
-        fn : str
+        fn : str or Path
             Filename of pump-probe stack (TIFF file) from DukeScan.
 
         Returns
         -------
         np.ndarray
-            1D array of time delays in picoseconds.
+            1D array of time delays in picoseconds. Empty array if extraction fails.
+
+        See Also
+        --------
+        delays_from_tiff : Extract delays from TIFF tag 285
+        delays_from_log : Extract delays from DukeScan .log file
         """
         # check if (older) x-axis file still exists
         fn_new = fn.replace(".tif", "_xaxis.txt")
         if os.path.isfile(fn_new):
-            import pandas as pd
 
             times = pd.read_table(fn_new, header=None).iloc[:, 0].to_numpy()
             return times
 
+        # if no x-axis file, try to extract delays from TIFF tags
+        try:
+            return PPS.delays_from_tiff(fn)
+        except Exception as e:
+            print("Error extracting delays from TIFF tags:", e)
+
+        # if no x-axis file and no TIFF tags, try extracting delays from log file
+        try:
+            return PPS.delays_from_log(fn)
+        except Exception as e:
+            print("Error extracting delays from log file:", e)
+
+        return np.array([])
+
+    @staticmethod
+    def delays_from_log(filename):
+        """Extract time delays from DukeScan .log file.
+
+        Parses the delayArr_ps field from the DukeScan log file using regex.
+        Supports all four DukeScan channels (_DS_CH1 through _DS_CH4) and
+        handles both UTF-8 and Latin-1 file encodings.
+
+        Parameters
+        ----------
+        filename : str
+            Filename of pump-probe stack TIFF file. The .log file is inferred
+            by replacing _DS_CH#.tif with .log.
+
+        Returns
+        -------
+        np.ndarray or list
+            1D array of time delays in picoseconds extracted from the log file.
+            Returns empty list if delayArr_ps pattern not found.
+
+        Notes
+        -----
+        The function searches for the pattern "delayArr_ps = <values>" in the
+        log file and extracts comma-separated numeric values.
+        """
         # import conventional log file
-        if fn.endswith("_DS_CH1.tif"):
-            fn_new = fn.replace("_DS_CH1.tif", ".log")
-        elif fn.endswith("_DS_CH2.tif"):
-            fn_new = fn.replace("_DS_CH2.tif", ".log")
-        elif fn.endswith("_DS_CH3.tif"):
-            fn_new = fn.replace("_DS_CH3.tif", ".log")
-        elif fn.endswith("_DS_CH4.tif"):
-            fn_new = fn.replace("_DS_CH4.tif", ".log")
+        if filename.endswith("_DS_CH1.tif"):
+            fn_new = filename.replace("_DS_CH1.tif", ".log")
+        elif filename.endswith("_DS_CH2.tif"):
+            fn_new = filename.replace("_DS_CH2.tif", ".log")
+        elif filename.endswith("_DS_CH3.tif"):
+            fn_new = filename.replace("_DS_CH3.tif", ".log")
+        elif filename.endswith("_DS_CH4.tif"):
+            fn_new = filename.replace("_DS_CH4.tif", ".log")
         try:
             with open(fn_new, "r", encoding="utf-8") as f:
                 log = f.read()
@@ -222,7 +296,7 @@ class PPS:
             with open(fn_new, "r", encoding="latin1") as f:
                 log = f.read()
 
-        fn_new = fn.replace("_DS_CH1.tif", ".log")
+        fn_new = filename.replace("_DS_CH1.tif", ".log")
 
         with open(fn_new, "r") as f:
             log = f.read()
@@ -230,9 +304,41 @@ class PPS:
         if match:
             times = np.fromstring(match.group(1), dtype=float, sep=",")
         else:
-            print("there was a problem importing time delays with", fn)
+            print("there was a problem importing time delays with", filename)
             times = []
         return times
+
+    @staticmethod
+    def delays_from_tiff(filename):
+        """Extract time delays from TIFF tag 285 metadata.
+
+        Reads time delay information embedded in TIFF tag 285 (PageName) for
+        each page/frame in the TIFF file. Expected format: "t = <value> ps".
+
+        Parameters
+        ----------
+        filename : str or Path
+            Filename of pump-probe stack TIFF file.
+
+        Returns
+        -------
+        list
+            List of time delays in picoseconds, one per TIFF page.
+
+        Notes
+        -----
+        The function looks for tag 285 values starting with "t = " and ending
+        with " ps", extracting the numeric value between them.
+        """
+        delays = []
+        with tifffile.TiffFile(filename) as tif:
+            for page in tif.pages:
+                if 285 in page.tags:
+                    tag_value = page.tags[285].value
+                    if tag_value.startswith(r"t = "):
+                        delay = float(tag_value[4:-3])
+                        delays.append(delay)
+        return delays
 
     @staticmethod
     def _substack_index_1d(size_image, size_sub):
