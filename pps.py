@@ -585,13 +585,14 @@ class PPS:
         images_subtracted = self.images - mean
         if inplace:
             self.images = images_subtracted
-
-        return PPS(
-            [images_subtracted, self.times],
-            mask=self.mask,
-            filename=self.filename,
-            dataType="data",
-        )
+            return self
+        else:
+            return PPS(
+                [images_subtracted, self.times],
+                mask=self.mask,
+                filename=self.filename,
+                dataType="data",
+            )
 
     def normalize(self, norm="minmax", inPlace=False):
         """
@@ -620,8 +621,9 @@ class PPS:
 
         if inPlace:
             self.images = self.images / extremum
-
-        return PPS([self.images / extremum, self.times], mask=self.mask)
+            return self
+        else:
+            return PPS([self.images / extremum, self.times], mask=self.mask)
 
     def avg(self, maskOn=True, norm=None):
         """
@@ -902,15 +904,16 @@ class PPS:
         mask_ds = downscale_local_mean(self.mask.astype(float), (size, size)) > 0
 
         if inplace:
-            self.images = images_ds
-            self.mask = mask_ds
+            self.images = np.array(images_ds)
+            self.mask = np.array(mask_ds)
             return self
+
         else:
             return PPS(
-                [images_ds, self.times],
+                [np.array(images_ds), self.times],
                 dataType="data",
                 filename=self.filename,
-                mask=mask_ds,
+                mask=np.array(mask_ds),
             )
 
     def _downsample_obsolete(self, size):
