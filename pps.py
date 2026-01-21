@@ -877,7 +877,7 @@ class PPS:
 
         return stacks
 
-    def downsample(self, size, obsolete_version=False):
+    def downsample(self, size, obsolete_version=False, inplace=False):
         """Downsample the stack to reduce resolution and improve SNR.
 
         Uses local mean downsampling to average neighboring pixels, reducing
@@ -901,12 +901,17 @@ class PPS:
         images_ds = [downscale_local_mean(img, (size, size)) for img in self.images]
         mask_ds = downscale_local_mean(self.mask.astype(float), (size, size)) > 0
 
-        return PPS(
-            [images_ds, self.times],
-            dataType="data",
-            filename=self.filename,
-            mask=mask_ds,
-        )
+        if inplace:
+            self.images = images_ds
+            self.mask = mask_ds
+            return self
+        else:
+            return PPS(
+                [images_ds, self.times],
+                dataType="data",
+                filename=self.filename,
+                mask=mask_ds,
+            )
 
     def _downsample_obsolete(self, size):
         """
