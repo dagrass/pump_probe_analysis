@@ -124,7 +124,7 @@ class PPS:
             if isinstance(data, Path):
                 data = str(data)
 
-            self.times = PPS.time_delays(data)
+            self.times = np.array(PPS.time_delays(data))
 
             # pump-probe stacks that were stitched together with ImageJ have less levels compared with
             # with DukeScan generated files. Also I introduced a typo into all filenames, I know it
@@ -467,15 +467,17 @@ class PPS:
 
         # redefine time delays and image stacks
         if inplace:
-            self.times = new_times
+            self.times = np.array(new_times)
             self.images = np.array(new_images)
+            return self
 
-        return PPS(
-            [np.array(new_images), np.array(new_times)],
-            mask=self.mask,
-            filename=self.filename,
-            dataType="data",
-        )
+        else:
+            return PPS(
+                [np.array(new_images), np.array(new_times)],
+                mask=self.mask,
+                filename=self.filename,
+                dataType="data",
+            )
 
     def select_delays(self, delays="melanoma1", inplace=True):
         """Select and filter specific time delays from the image stack.
@@ -550,15 +552,17 @@ class PPS:
 
         # redefine time delays and image stacks
         if inplace:
-            self.times = self.times[pos]
-            self.images = self.images[pos]
+            self.times = np.array(self.times[pos])
+            self.images = np.array(self.images[pos])
+            return self
 
-        return PPS(
-            [self.images[pos], self.times[pos]],
-            mask=self.mask,
-            filename=self.filename,
-            dataType="data",
-        )
+        else:
+            return PPS(
+                [np.array(self.images[pos]), np.array(self.times[pos])],
+                mask=self.mask,
+                filename=self.filename,
+                dataType="data",
+            )
 
     def subtractFirst(self, n=1, inplace=True):
         """Subtract average of first n images from entire stack.
@@ -584,11 +588,11 @@ class PPS:
         mean = np.mean(self.images[:n], axis=0)
         images_subtracted = self.images - mean
         if inplace:
-            self.images = images_subtracted
+            self.images = np.array(images_subtracted)
             return self
         else:
             return PPS(
-                [images_subtracted, self.times],
+                [np.array(images_subtracted), np.array(self.times)],
                 mask=self.mask,
                 filename=self.filename,
                 dataType="data",
@@ -911,7 +915,7 @@ class PPS:
 
         else:
             return PPS(
-                [np.array(images_ds), self.times],
+                [np.array(images_ds), np.array(self.times)],
                 dataType="data",
                 filename=self.filename,
                 mask=np.array(mask_ds),
