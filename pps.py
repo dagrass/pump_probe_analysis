@@ -906,6 +906,7 @@ class PPS:
         if inplace:
             self.images = np.array(images_ds)
             self.mask = np.array(mask_ds)
+            self.image_dimensions = self.images[0].shape
             return self
 
         else:
@@ -1346,8 +1347,15 @@ class PPS:
 
         if inplace:
             self.mask = mask
+            return self
 
-        return mask
+        else:
+            return PPS(
+                [self.images, self.times],
+                dataType="data",
+                filename=self.filename,
+                mask=mask,
+            )
 
     @staticmethod
     def intensity_threshold_shared(stacks, threshold, sigma=5):
